@@ -1,0 +1,133 @@
+<?php
+// $Id$
+/**
+ * @file ambient_sms_gateway.install
+ * Supporting ScrumyCamp schemas
+ */
+
+/**
+ * Implementation of hook_schema().
+ */
+function ambient_sms_gateway_schema() {
+  $schema['ambient_sms_gateway_outbox'] = array(
+    'description' => 'Stores information about sent sms messages',
+    'fields' => array(
+      'id' => array(
+        'description' => 'The record ID',
+        'type' => 'serial',
+      ),
+      'destination' => array(
+        'description' => 'The destination number',
+        'type' => 'text',
+      ),
+      'message' => array(
+        'description' => 'The message',
+        'type' => 'text',
+      ),
+      'sent_at' => array(
+        'description' => 'The time the message was sent',
+        'type' => 'int',
+      ),
+      'response_code' => array(
+        'description' => 'The time the message was sent',
+        'type' => 'int',
+      ),
+      'response_message' => array(
+        'description' => 'The message',
+        'type' => 'text',
+      ),
+      'response_message_id' => array(
+        'description' => 'The message id',
+        'type' => 'int',
+      ),
+    ),
+    'primary key' => array('id'),
+  );
+
+  $schema['ambient_sms_gateway_outbox_transaction'] = array(
+    'description' => 'Stores information about sent sms messages transactions',
+    'fields' => array(
+      'id' => array(
+        'description' => 'The record ID',
+        'type' => 'int',
+      ),
+      'request' => array(
+        'type' => 'text',
+      ),
+      'response' => array(
+        'type' => 'text',
+      ),
+    ),
+  );
+
+  // msisdn=27826941134&shortcode=2782007210000006&keyword=Hi&msg=Hi+dude&message_id=1
+  $schema['ambient_sms_gateway_inbox'] = array(
+    'description' => 'Stores information about received sms messages',
+    'fields' => array(
+      'id' => array(
+        'description' => 'The record ID',
+        'type' => 'serial',
+      ),
+      'sender' => array(
+        'description' => 'The destination number',
+        'type' => 'text',
+      ),
+      'destination' => array(
+        'description' => 'The destination number',
+        'type' => 'text',
+      ),
+      'message' => array(
+        'description' => 'The message',
+        'type' => 'text',
+      ),
+      'in_reply_to' => array(
+        'description' => 'Will be set to an outbox id if this is a reply',
+        'type' => 'int',
+      ),
+      'received_at' => array(
+        'description' => 'The time the message was received',
+        'type' => 'int',
+      ),
+      'processed_at' => array(
+        'description' => 'The time the message was processed',
+        'type' => 'int',
+      ),
+    ),
+    'primary key' => array('id'),
+  );
+
+  $schema['ambient_sms_gateway_inbox_transaction'] = array(
+    'description' => 'Stores information about received sms messages transactions',
+    'fields' => array(
+      'id' => array(
+        'description' => 'The record ID',
+        'type' => 'int',
+      ),
+      'request' => array(
+        'type' => 'text',
+      ),
+      'response' => array(
+        'type' => 'text',
+      ),
+    ),
+  );
+
+  return $schema;
+}
+
+
+/**
+ * Implementation of hook_install().
+ */
+function ambient_sms_gateway_install() {
+  drupal_install_schema("ambient_sms_gateway");
+}
+
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function ambient_sms_gateway_uninstall() {
+  drupal_uninstall_schema("ambient_sms_gateway");
+}
+

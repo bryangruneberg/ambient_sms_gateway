@@ -1,0 +1,192 @@
+<?php
+// $Id$
+/**
+ * @file ambient_sms_gateway.module
+ * Implementation of the Ambient sms gateway
+ */
+
+require_once("ambient_sms_gateway.outbound.inc");
+require_once("ambient_sms_gateway.inbound.inc");
+
+/**
+ * Implementation of hook_menu().
+ */
+function ambient_sms_gateway_menu() { 
+  // Inbound endpoint for SMS
+  $items['gateway/ambient/inbound.php'] = array(
+    'page callback' => 'ambient_sms_gateway_incoming_callback',
+    'page arguments' => array(),
+    'access callback' => 'ambient_sms_gateway_incoming_access_callback',
+    'access arguments' => array(),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+
+/**
+ * Implementation of hook_gateway_info().
+ */
+function ambient_sms_gateway_gateway_info() {
+    return array(
+      'ambient_sms_gateway' => array(
+        'name' => 'Ambient Gateway',
+        'send' => 'ambient_sms_gateway_send',
+        'receive' => TRUE,
+        'configure form' => 'ambient_sms_gateway_admin_form',
+        'send form' => 'ambient_sms_gateway_send_form',
+        'validate number' => 'ambient_sms_gateway_validate_number',
+      )
+    );
+}
+
+/**
+ * Return and administration form for configuring the gateway
+ */
+function ambient_sms_gateway_admin_form($configuration) {
+  $form['ambient_api_key'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Ambient API key'),
+    '#default_value' => $configuration['ambient_api_key'],
+    '#size' => '50'
+  );
+  
+  $form['ambient_api_password'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Ambient API password'),
+    '#default_value' => $configuration['ambient_api_password'],
+    '#size' => '50'
+  );
+
+  $form['ambient_api_sms_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Ambient API SMS URL'),
+    '#default_value' => empty($configuration['ambient_api_sms_url']) ? 'https://services.ambientmobile.co.za/sms' : $configuration['ambient_api_sms_url'],
+    '#size' => '50'
+  );
+
+  $form['ambient_sms_batch_process'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Batch processing'),
+    '#description' => t('If this is enabled, SMS messages will be queued and processed at cron time. If it is disabled, and sms is processed immediately.'),
+    '#default_value' => intval($configuration['ambient_sms_batch_process']),
+  );
+
+  $form['ambient_inbox_process_per_cron'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Process inbox rate'),
+    '#description' => t('This is how many inbox messages will be processed per cron run. Default: 500'),
+    '#default_value' => empty($configuration['ambient_inbox_process_per_cron']) ? 500 : empty($configuration['ambient_inbox_process_per_cron']),
+    '#size' => '50'
+  );
+
+
+  return $form;
+}
+
+/**
+ * Send method for the ambient gateway
+ */
+function ambient_sms_gateway_send($number, $message, $options) {
+
+    $configuration = variable_get('sms_ambient_sms_gateway_settings', array());
+    if(! $configuration['ambient_api_key'] || ! $configuration['ambient_api_password'] || ! $configuration['ambient_api_sms_url']) {
+      drupal_set_message("Please configure the Ambient SMS Gateway module before sending messages.","error");
+      return array(                            
+        'status' => FALSE,                         
+        'message' => 'Please configure the Ambient SMS Gateway module before sending messages.',
+        'variables' => array(),
+      );
+    }
+
+    $configuration['options'] = $options;
+    $sms = new ambientOutboundSms($number, $message, $configuration);
+    $sms->send();
+
+    return array(                            
+     'status' => $sms->send_status,                         
+     'message' => $sms->send_status_message,
+     'variables' => array(),
+    );
+}
+
+/**
+ * There are no fields added to the send form. 
+ * Seems like the implimentation requires this though
+ */
+function ambient_sms_gateway_send_form($required = FALSE) {
+    $form = array();
+
+    return $form;
+}
+
+/**
+ * Deal with inbound SMS. Check out hook_menu above.
+ * This function will write the message to an ambeint staging table that is processed
+ * at cron run. By default 500 messages are processed per cron run
+ */
+function ambient_sms_gateway_incoming_callback() {
+  $XML_RESPONSE = "<xml>OK</xml>"; // We just return OK all the time.
+
+  $sms = ambientInboundSms::parseInbound();
+  $sms->transaction->response = $XML_RESPONSE;
+
+  $configuration = variable_get('sms_ambient_sms_gateway_settings', array());
+  if($configuration['ambient_sms_batch_process'] > 0) {
+    $sms->logTransaction(); // This writes to the db for cron processing
+  } else {
+    $sms->processed_at = time();
+    $sms->logTransaction(); // This writes to the db for cron processing
+    sms_incoming($sms->sender, $sms->message, array('inbox_data' => $sms));
+  }
+
+  print $XML_RESPONSE;
+}
+
+function ambient_sms_gateway_incoming_access_callback() {
+  
+  if(!$_POST['msisdn'] || !$_POST['msg']) { return FALSE; }
+
+  //TODO: Do we want to match Ambient IP's here?
+  return TRUE;
+}
+
+/** 
+ * Implementation of hook_validate_number().
+ * For now we are simply allowing all numbers through. We must check 
+ * with Ambient what format the allow
+ */
+function ambient_sms_gateway_validate_number($number, $options) {
+  return TRUE;
+}
+
+/**
+ * Implementation of hook_cron().
+ */
+function ambient_sms_gateway_cron() {
+  $configuration = variable_get('sms_ambient_sms_gateway_settings', array());
+  
+  if(intval($configuration['ambient_inbox_process_per_cron'])<=0) { $count = 500; }
+  else { $count = intval($configuration['ambient_inbox_process_per_cron']); }
+
+  ambient_sms_gateway_process_inbox($count);
+}
+
+/**
+ * Process the inbox
+ */
+function ambient_sms_gateway_process_inbox($max) {
+  $res = db_query("select * from {ambient_sms_gateway_inbox} where processed_at is NULL or processed_at <= 0 limit %d",intval($max));
+  $count = 0;
+  while($row = db_fetch_object($res)) {
+    $count++;
+    db_query("update ambient_sms_gateway_inbox set processed_at=%d where id=%d", time(), $row->id);
+    sms_incoming($row->sender, $row->message, array('inbox_data' => $row));
+  }
+  
+  if($count > 0) {
+    watchdog("Ambient SMS Gateway", "Processed %d inbox messages", array("%d" => $count));
+  }
+}
+

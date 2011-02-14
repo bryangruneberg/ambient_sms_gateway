@@ -1,0 +1,6 @@
+; $Id$
+name = Ambient sms gateway
+description = Send and receive SMS messages using the Ambient Gateway
+core = 6.x
+
+package = SMS Framework
